@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+google-cloud-aiplatform
+python-dotenv
+confluent-kafka
+requests
