@@ -141,6 +141,10 @@ st.divider()
 # -----------------------------------------------------
 # PR MERGE SPARKLINE GRAPH (NEW)
 # -----------------------------------------------------
+st.markdown("""
+### 📈 PR Merge Success Trend
+<small style='color:#666;'>Tracks how often AI-generated PRs are merged over time.</small>
+""", unsafe_allow_html=True)
 if total_pr_events > 0:
     df = pd.DataFrame({
         "merged": [1 if e.get("merged") else 0 for e in all_pr_events]
