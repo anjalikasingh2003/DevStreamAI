@@ -1,118 +1,158 @@
 import streamlit as st
 import json
+import time
 from confluent_kafka import Consumer
 import os
 from dotenv import load_dotenv
 
-# Load environment variables
+# Load .env
 load_dotenv()
 
-# Page Configuration
-st.set_page_config(
-    page_title="DevStream AI Dashboard",
-    page_icon="🚀",
-    layout="wide"
-)
+# -----------------------------------------------------
+# PAGE CONFIG + CSS
+# -----------------------------------------------------
+st.set_page_config(page_title="DevStream AI Dashboard", page_icon="🚀", layout="wide")
 
-# Custom CSS for a modern "Card" look
 st.markdown("""
-    <style>
-    .main { background-color: #f8f9fa; }
-    .stMetric { 
-        background-color: #ffffff; 
-        padding: 15px; 
-        border-radius: 10px; 
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05); 
-    }
-    div[data-testid="stExpander"] {
-        border: none !important;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-        background: white;
-        border-radius: 8px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+<style>
+.log-box {
+    max-height: 350px;
+    overflow-y: auto;
 
-# Kafka Configuration
-conf = {
-    "bootstrap.servers": os.getenv("CONFLUENT_BOOTSTRAP"),
-    "group.id": "dashboard-group",
-    "auto.offset.reset": "earliest",
-    "security.protocol": "SASL_SSL",
-    "sasl.mechanism": "PLAIN",
-    "sasl.username": os.getenv("KAFKA_API_KEY"),
-    "sasl.password": os.getenv("KAFKA_API_SECRET"),
+    /* Beautiful light terminal look */
+    background: #f4f6fb;
+    border-left: 4px solid #4a90e2;
+    padding: 14px;
+
+    color: #2b2b2b;
+    border-radius: 6px;
+
+    font-family: "JetBrains Mono", "Source Code Pro", monospace;
+    font-size: 0.90rem;
+    line-height: 1.45;
+
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
 }
+</style>
+""", unsafe_allow_html=True)
 
-consumer = Consumer(conf)
-consumer.subscribe(["ci_failures", "ci_ai_fixes"])
+# -----------------------------------------------------
+# KAFKA CONSUMER (Cached)
+# -----------------------------------------------------
+@st.cache_resource
+def get_consumer():
+    conf = {
+        "bootstrap.servers": os.getenv("CONFLUENT_BOOTSTRAP"),
+        "group.id": "dashboard-final-v1",
+        "auto.offset.reset": "earliest",
+        "security.protocol": "SASL_SSL",
+        "sasl.mechanism": "PLAIN",
+        "sasl.username": os.getenv("KAFKA_API_KEY"),
+        "sasl.password": os.getenv("KAFKA_API_SECRET"),
+    }
+    c = Consumer(conf)
+    c.subscribe(["ci_failures", "ci_ai_fixes"])
+    return c
 
-# Header Section
-st.title("🚀 DevStream AI")
-st.markdown("#### Real-Time CI Autoremediation Dashboard")
 
-# Metrics Row
+consumer = get_consumer()
+
+# -----------------------------------------------------
+# SESSION STATE (ALWAYS INITIALIZED ON FIRST RUN)
+# -----------------------------------------------------
+# Structure: session_state.builds = { build_id: {failure: {...}, fix: {...}, ts: timestamp} }
+if "builds" not in st.session_state:
+    st.session_state.builds = {}
+
+# -----------------------------------------------------
+# REFRESH SYSTEM
+# -----------------------------------------------------
+# Auto-refresh every 1 second WITHOUT resetting script state
+st_autorefresh = st.experimental_rerun if hasattr(st, "experimental_rerun") else st.rerun
+st_autorefresh = st.rerun  # modern API
+
+
+# -----------------------------------------------------
+# HEADER
+# -----------------------------------------------------
+st.title("🚀 DevStream AI — Live CI Autoremediation Dashboard")
+st.caption("Failures on the left → AI fixes on the right")
+
+total_failures = len(st.session_state.builds)
+total_fixes = len([b for b in st.session_state.builds.values() if b["fix"]])
+
 m1, m2, m3 = st.columns(3)
 m1.metric("System Status", "Active", delta="Healthy")
-m2.metric("AI Fixes Generated", "12", delta="+2")
-m3.metric("PRs Merged", "8", delta="100%")
+m2.metric("Failures Detected", total_failures)
+m3.metric("AI Fixes Generated", total_fixes)
 
 st.divider()
 
-# Layout Columns
-col1, col2 = st.columns(2)
+# -----------------------------------------------------
+# POLL KAFKA FOR NEW EVENTS
+# -----------------------------------------------------
+msg = consumer.poll(0.1)
 
-with col1:
-    st.subheader("🔥 Incoming CI Failures")
-    failures_box = st.container()
-
-with col2:
-    st.subheader("🤖 AI Analysis + Fixes")
-    ai_box = st.container()
-
-def render_diff(patch: str):
-    """Render unified diff with color highlighting."""
-    if not patch:
-        return st.write("No patch produced.")
-    st.code(patch, language="diff")
-
-# Main Event Loop
-while True:
-    msg = consumer.poll(1.0)
-    if msg is None:
-        continue
-    if msg.error():
-        st.error(f"Consumer error: {msg.error()}")
-        continue
-
+if msg and not msg.error():
     data = json.loads(msg.value().decode("utf-8"))
 
-    # --- Incoming CI Failure ---
     if msg.topic() == "ci_failures":
-        with failures_box:
-            with st.chat_message("user", avatar="❌"):
-                st.markdown("### CI Failure Received")
-                with st.expander("📄 View Error Log", expanded=True):
-                    st.code(data.get("log", ""), language="bash")
-                with st.expander("🔍 View Source Code"):
-                    st.code(data.get("code", ""), language="python")
+        build_id = data.get("id")
+    else:
+        build_id = data.get("failure_id")
 
-    # --- AI Result (Fix + PR URL) ---
-    elif msg.topic() == "ci_ai_fixes":
-        with ai_box:
-            with st.chat_message("assistant", avatar="🤖"):
-                st.markdown("### AI Remediation Plan")
-                
-                st.info(f"**Root Cause:** {data.get('root_cause', 'Analyzing...')}")
-                
-                st.markdown("**Explanation:**")
-                st.write(data.get("explanation", "No explanation provided."))
+    if not build_id:
+        print("❗ WARNING: Received message without valid build ID →", data)
 
-                with st.expander("🛠️ View Proposed Patch", expanded=True):
-                    render_diff(data.get("patch", ""))
+    if build_id:
+        if build_id not in st.session_state.builds:
+            st.session_state.builds[build_id] = {"failure": None, "fix": None, "ts": time.time()}
 
-                if "pr_url" in data:
-                    st.success(f"✅ **Pull Request Created:** [Open GitHub PR]({data['pr_url']})")
+        if msg.topic() == "ci_failures":
+            st.session_state.builds[build_id]["failure"] = data
+        else:
+            st.session_state.builds[build_id]["fix"] = data
 
-                if "pr_error" in data:
-                    st.error(f"⚠️ **PR Creation Failed:** {data['pr_error']}")
+
+# -----------------------------------------------------
+# DISPLAY PAIRED FAILURES + FIXES
+# -----------------------------------------------------
+for build_id, info in sorted(st.session_state.builds.items(), key=lambda x: x[1]["ts"], reverse=True):
+    st.markdown(f"### 🧪 Build ID: `{build_id}`")
+    col1, col2 = st.columns(2)
+
+    # LEFT → CI FAILURE
+    with col1:
+        fail = info["failure"]
+        if fail:
+            st.subheader("❌ CI Failure")
+            st.markdown(f'<div class="log-box">{fail.get("log","")}</div>', unsafe_allow_html=True)
+
+            with st.expander("Source Code"):
+                st.code(fail.get("code", ""), language="python")
+        else:
+            st.info("Waiting for failure...")
+
+    # RIGHT → AI FIX
+    with col2:
+        fix = info["fix"]
+        if fix:
+            st.subheader("🤖 AI Remediation")
+            st.info(f"Root Cause: {fix.get('root_cause','')}")
+            st.write(fix.get("explanation", ""))
+
+            with st.expander("Proposed Patch", expanded=True):
+                st.code(fix.get("patch", ""), language="diff")
+
+            if fix.get("pr_url"):
+                st.success(f"PR Created → {fix['pr_url']}")
+            if fix.get("pr_error"):
+                st.error(f"PR Error: {fix['pr_error']}")
+        else:
+            st.warning("⏳ AI is analyzing this failure...")
+
+    st.divider()
+
+# Auto-refresh UI every 1 sec
+time.sleep(1)
+st.rerun()

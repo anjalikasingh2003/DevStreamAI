@@ -45,18 +45,20 @@ def run_agent():
             continue
 
         data = json.loads(msg.value().decode("utf-8"))
-
+        failure_id=data.get("id")
         log = data["log"]
         code = data["code"]
 
         print("\n📥 Incoming Failure Event:")
         print(log)
+        print("failure_id:", failure_id)
         # --- STEP 1: Analyze failure using AI Engine ---
         # Call AI Engine
         ai_output = analyze_failure(log, code)
 
         print("\n🤖 AI Output:")
         print(ai_output)
+        ai_output["failure_id"] = failure_id
          # --- STEP 2: Create PR from AI patch ---
         try:
             patch = ai_output.get("patch")
