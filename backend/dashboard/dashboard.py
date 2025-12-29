@@ -79,8 +79,42 @@ total_failures = len(st.session_state.builds)
 total_fixes = len([b for b in st.session_state.builds.values() if b.get("fix")])
 total_prs = len([b for b in st.session_state.builds.values() if b.get("pr")])
 
+def compute_system_status():
+    # 1. Kafka health
+    try:
+        consumer.list_topics(timeout=1.5)
+        kafka_ok = True
+    except:
+        return "DOWN", "Kafka unreachable"
+
+    # 2. Message activity
+    ts = st.session_state.get("last_message_ts")
+    if ts is None:
+        return "Idle", "Waiting for first event"
+
+    gap = time.time() - ts
+    if gap < 60:
+        activity = "Active"
+    elif gap < 300:
+        activity = "Idle"
+    else:
+        activity = "Stale"
+
+    # 3. Fix ratio
+    failures = len(st.session_state.builds)
+    fixes = len([b for b in st.session_state.builds.values() if b.get("fix")])
+
+    if failures == 0:
+        return "Active", "System ready"
+
+    if fixes == failures:
+        return "Healthy", "All failures fixed"
+
+    return activity, f"{failures - fixes} pending fixes"
+
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("System Status", "Active", delta="Healthy")
+status, desc = compute_system_status()
+m1.metric("System Status", status, delta=desc)
 m2.metric("Failures", total_failures)
 m3.metric("AI Fixes", total_fixes)
 m4.metric("PR Events", total_prs)
@@ -94,6 +128,7 @@ msg = consumer.poll(0.5)
 
 if msg and not msg.error():
     data = json.loads(msg.value().decode("utf-8"))
+    st.session_state.last_message_ts = time.time()
     topic = msg.topic()
 
     # Determine build ID
