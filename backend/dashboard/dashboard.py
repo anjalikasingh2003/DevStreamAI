@@ -19,7 +19,6 @@ st.markdown("""
     max-height: 350px;
     overflow-y: auto;
 
-    /* Beautiful light terminal look */
     background: #f4f6fb;
     border-left: 4px solid #4a90e2;
     padding: 14px;
@@ -43,8 +42,8 @@ st.markdown("""
 def get_consumer():
     conf = {
         "bootstrap.servers": os.getenv("CONFLUENT_BOOTSTRAP"),
-        "group.id": "dashboard-final-v1",
-        "auto.offset.reset": "earliest",
+        "group.id": "dashboard-final-v4",
+        "auto.offset.reset": "latest",
         "security.protocol": "SASL_SSL",
         "sasl.mechanism": "PLAIN",
         "sasl.username": os.getenv("KAFKA_API_KEY"),
@@ -54,23 +53,13 @@ def get_consumer():
     c.subscribe(["ci_failures", "ci_ai_fixes"])
     return c
 
-
 consumer = get_consumer()
 
 # -----------------------------------------------------
-# SESSION STATE (ALWAYS INITIALIZED ON FIRST RUN)
+# SESSION STATE (INITIALIZE ONCE)
 # -----------------------------------------------------
-# Structure: session_state.builds = { build_id: {failure: {...}, fix: {...}, ts: timestamp} }
 if "builds" not in st.session_state:
     st.session_state.builds = {}
-
-# -----------------------------------------------------
-# REFRESH SYSTEM
-# -----------------------------------------------------
-# Auto-refresh every 1 second WITHOUT resetting script state
-st_autorefresh = st.experimental_rerun if hasattr(st, "experimental_rerun") else st.rerun
-st_autorefresh = st.rerun  # modern API
-
 
 # -----------------------------------------------------
 # HEADER
@@ -88,9 +77,9 @@ m3.metric("AI Fixes Generated", total_fixes)
 st.divider()
 
 # -----------------------------------------------------
-# POLL KAFKA FOR NEW EVENTS
+# POLL KAFKA FOR NEW EVENT (ONCE PER REFRESH)
 # -----------------------------------------------------
-msg = consumer.poll(0.1)
+msg = consumer.poll(0.5)
 
 if msg and not msg.error():
     data = json.loads(msg.value().decode("utf-8"))
@@ -100,9 +89,6 @@ if msg and not msg.error():
     else:
         build_id = data.get("failure_id")
 
-    if not build_id:
-        print("❗ WARNING: Received message without valid build ID →", data)
-
     if build_id:
         if build_id not in st.session_state.builds:
             st.session_state.builds[build_id] = {"failure": None, "fix": None, "ts": time.time()}
@@ -111,7 +97,6 @@ if msg and not msg.error():
             st.session_state.builds[build_id]["failure"] = data
         else:
             st.session_state.builds[build_id]["fix"] = data
-
 
 # -----------------------------------------------------
 # DISPLAY PAIRED FAILURES + FIXES
@@ -151,7 +136,10 @@ for build_id, info in sorted(st.session_state.builds.items(), key=lambda x: x[1]
             st.warning("⏳ AI is analyzing this failure...")
 
     st.divider()
+# -----------------------------------------------------
+# AUTO-REFRESH EVERY 2 SECONDS
+# -----------------------------------------------------
+st_autorefresh = st.experimental_rerun if hasattr(st, "experimental_rerun") else None
 
-# Auto-refresh UI every 1 sec
-time.sleep(1)
-st.rerun()
+from streamlit_autorefresh import st_autorefresh
+st_autorefresh(interval=2000, limit=None)
