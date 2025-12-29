@@ -76,7 +76,6 @@ st_autorefresh = st.rerun  # modern API
 # HEADER
 # -----------------------------------------------------
 st.title("🚀 DevStream AI — Live CI Autoremediation Dashboard")
-st.caption("Failures on the left → AI fixes on the right")
 
 total_failures = len(st.session_state.builds)
 total_fixes = len([b for b in st.session_state.builds.values() if b["fix"]])
