@@ -4,6 +4,7 @@ import time
 from confluent_kafka import Consumer
 import os
 from dotenv import load_dotenv
+import pandas as pd
 
 # Load .env
 load_dotenv()
@@ -50,7 +51,7 @@ st.markdown("""
 def get_consumer():
     conf = {
         "bootstrap.servers": os.getenv("CONFLUENT_BOOTSTRAP"),
-        "group.id": "dashboard-final-v7",
+        "group.id": "dashboard-final-v10",
         "auto.offset.reset": "latest",
         "security.protocol": "SASL_SSL",
         "sasl.mechanism": "PLAIN",
@@ -69,69 +70,99 @@ consumer = get_consumer()
 if "builds" not in st.session_state:
     st.session_state.builds = {}
 
+if "last_message_ts" not in st.session_state:
+    st.session_state.last_message_ts = None
+
+if "kafka_latency" not in st.session_state:
+    st.session_state.kafka_latency = []
+
+
+# -----------------------------------------------------
+# SYSTEM STATUS (NEW)
+# -----------------------------------------------------
+def compute_system_status():
+    # Measure Kafka latency
+    start = time.time()
+    try:
+        consumer.list_topics(timeout=1.5)
+        kafka_up = True
+    except:
+        return ("🔴 DOWN", "Kafka unreachable", 999)
+
+    latency_ms = (time.time() - start) * 1000
+    st.session_state.kafka_latency.append(latency_ms)
+    st.session_state.kafka_latency = st.session_state.kafka_latency[-30:]
+
+    # Activity check
+    ts = st.session_state.last_message_ts
+
+    if ts is None:
+        return ("🟡 Idle", "Waiting for first event", latency_ms)
+
+    gap = time.time() - ts
+
+    if gap < 60:
+        heartbeat = "🟢 Active"
+    elif gap < 300:
+        heartbeat = "🟡 Idle"
+    else:
+        heartbeat = "🔴 Stale"
+
+    return (heartbeat, f"Last event {int(gap)}s ago", latency_ms)
+
 
 # -----------------------------------------------------
 # HEADER
 # -----------------------------------------------------
-st.title("🚀 DevStream AI — Live CI Autoremediation + PR Timeline Dashboard")
+status, status_desc, kafka_latency = compute_system_status()
 
 total_failures = len(st.session_state.builds)
 total_fixes = len([b for b in st.session_state.builds.values() if b.get("fix")])
-total_prs = len([b for b in st.session_state.builds.values() if b.get("pr")])
 
-def compute_system_status():
-    # 1. Kafka health
-    try:
-        consumer.list_topics(timeout=1.5)
-        kafka_ok = True
-    except:
-        return "DOWN", "Kafka unreachable"
+# PR Merge rate calculation
+all_pr_events = []
+for b in st.session_state.builds.values():
+    all_pr_events.extend(b.get("pr", []))
 
-    # 2. Message activity
-    ts = st.session_state.get("last_message_ts")
-    if ts is None:
-        return "Idle", "Waiting for first event"
+total_pr_events = len(all_pr_events)
+merged_count = len([e for e in all_pr_events if e.get("merged") is True])
 
-    gap = time.time() - ts
-    if gap < 60:
-        activity = "Active"
-    elif gap < 300:
-        activity = "Idle"
-    else:
-        activity = "Stale"
+merge_rate = (merged_count / total_pr_events * 100) if total_pr_events else 0
 
-    # 3. Fix ratio
-    failures = len(st.session_state.builds)
-    fixes = len([b for b in st.session_state.builds.values() if b.get("fix")])
-
-    if failures == 0:
-        return "Active", "System ready"
-
-    if fixes == failures:
-        return "Healthy", "All failures fixed"
-
-    return activity, f"{failures - fixes} pending fixes"
-
+# METRICS ROW
 m1, m2, m3, m4 = st.columns(4)
-status, desc = compute_system_status()
-m1.metric("System Status", status, delta=desc)
-m2.metric("Failures", total_failures)
-m3.metric("AI Fixes", total_fixes)
-m4.metric("PR Events", total_prs)
+m1.metric("System Status", status, delta=status_desc)
+m2.metric("Kafka Latency", f"{kafka_latency:.1f} ms")
+m3.metric("PR Merge Success", f"{merge_rate:.1f}%")
+m4.metric("Total Builds", total_failures)
 
 st.divider()
 
 # -----------------------------------------------------
-# CONSUME ONE MESSAGE FROM KAFKA PER REFRESH
+# PR MERGE SPARKLINE GRAPH (NEW)
+# -----------------------------------------------------
+if total_pr_events > 0:
+    df = pd.DataFrame({
+        "merged": [1 if e.get("merged") else 0 for e in all_pr_events]
+    })
+    st.line_chart(df["merged"])
+else:
+    st.info("PR merge graph will appear after PR events start.")
+
+st.divider()
+
+# -----------------------------------------------------
+# CONSUME ONE MESSAGE FROM KAFKA
 # -----------------------------------------------------
 msg = consumer.poll(0.5)
 
 if msg and not msg.error():
     data = json.loads(msg.value().decode("utf-8"))
     st.session_state.last_message_ts = time.time()
+
     topic = msg.topic()
 
-    # Determine build ID
+    # Match build ID
     if topic == "ci_failures":
         build_id = data.get("id")
     else:
@@ -148,27 +179,21 @@ if msg and not msg.error():
             st.session_state.builds[build_id]["fix"] = data
 
         elif topic == "ci_pr_updates":
-            # Store multiple PR events
             st.session_state.builds[build_id]["pr"].append(data)
 
-
 # -----------------------------------------------------
-# RENDER BUILDS
+# SHOW BUILDS
 # -----------------------------------------------------
 for build_id, info in sorted(st.session_state.builds.items(), key=lambda x: x[1]["ts"], reverse=True):
 
     st.markdown(f"## 🧪 Build `{build_id}`")
 
-    # -----------------------------------------------------
-    # ROW 1 → FAILURE + FIX
-    # -----------------------------------------------------
     c1, c2 = st.columns(2)
 
     # FAILURE
     with c1:
         fail = info["failure"]
         st.subheader("❌ CI Failure")
-
         if fail:
             st.markdown(f'<div class="log-box">{fail.get("log","")}</div>', unsafe_allow_html=True)
             with st.expander("Source Code"):
@@ -180,7 +205,6 @@ for build_id, info in sorted(st.session_state.builds.items(), key=lambda x: x[1]
     with c2:
         fix = info["fix"]
         st.subheader("🤖 AI Fix")
-
         if fix:
             st.info(f"Root Cause: {fix.get('root_cause','')}")
             st.write(fix.get("explanation", ""))
@@ -195,12 +219,8 @@ for build_id, info in sorted(st.session_state.builds.items(), key=lambda x: x[1]
         else:
             st.warning("⏳ AI is analyzing...")
 
-    # -----------------------------------------------------
-    # ROW 2 → PR TIMELINE (FULL WIDTH)
-    # -----------------------------------------------------
+    # PR TIMELINE
     st.subheader("📌 Pull Request Timeline")
-
-    pr_events = info["pr"]
 
     if fix and fix.get("pr_url"):
         st.markdown(f"""
@@ -210,41 +230,32 @@ for build_id, info in sorted(st.session_state.builds.items(), key=lambda x: x[1]
             </div>
         """, unsafe_allow_html=True)
 
-    if len(pr_events) == 0:
-        st.info("Waiting for PR events...")
-    else:
-        for ev in pr_events:
-            status = ev.get("status")
-            action=ev.get("action")
-            merged=ev.get("merged")
+    for ev in info["pr"]:
+        action = ev.get("action")
+        merged = ev.get("merged")
 
-            # Merged PR
-            if merged is True:
-                st.markdown("""
-                    <div class="timeline-box status-merged">
-                        ✅ PR Merged into master
-                    </div>
-                """, unsafe_allow_html=True)
+        if merged is True:
+            st.markdown("""
+                <div class="timeline-box status-merged">
+                    ✅ PR Merged into master
+                </div>
+            """, unsafe_allow_html=True)
 
-                        
-            # Closed but NOT merged
-            elif action == "closed":
-                st.markdown("""
-                    <div class="timeline-box status-closed">
-                        ❌ PR Closed (Not merged)
-                    </div>
-                """, unsafe_allow_html=True)
+        elif action == "closed":
+            st.markdown("""
+                <div class="timeline-box status-closed">
+                    ❌ PR Closed (Not merged)
+                </div>
+            """, unsafe_allow_html=True)
 
-            # PR opened
-            elif action == "opened":
-                st.markdown("""
-                    <div class="timeline-box status-created">
-                        🚀 PR Opened
-                    </div>
-                """, unsafe_allow_html=True)
+        elif action == "opened":
+            st.markdown("""
+                <div class="timeline-box status-created">
+                    📄 PR Opened
+                </div>
+            """, unsafe_allow_html=True)
 
     st.divider()
-
 
 # -----------------------------------------------------
 # AUTO REFRESH
