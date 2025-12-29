@@ -70,7 +70,7 @@ def run_agent():
 
             print("\n🛠️ Creating PR...")
             file_path = data.get("file_path")
-            pr_url = create_pr_from_patch(patch, explanation, file_path)
+            pr_url = create_pr_from_patch(patch, explanation, file_path, failure_id)
             ai_output["pr_url"] = pr_url
 
             print("🚀 PR Created Successfully:", pr_url)
