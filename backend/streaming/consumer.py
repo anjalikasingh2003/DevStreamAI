@@ -3,6 +3,7 @@ import json
 import os
 from ..ai.ai_engine import analyze_failure
 from ..github.pr_creator import create_pr_from_patch
+from ..server.notifier import notify_slack, send_email
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -42,12 +43,20 @@ def run_agent():
             continue
         if msg.error():
             print("Consumer error:", msg.error())
-            continue
+
 
         data = json.loads(msg.value().decode("utf-8"))
         failure_id=data.get("id")
         log = data["log"]
         code = data["code"]
+                    
+        if msg.topic() == "ci_failures":
+            notify_slack(f"🚨 CI Failure detected in {data['repo_name']} on {data['branch']}")
+            send_email(
+                to_email="anjalikasingh2003@gmail.com",
+                subject="🚨 CI Failure Detected",
+                body=f"Repo: {data['repo_name']}\nBranch: {data['branch']}\nCommit: {data['commit']}"
+            )
 
         print("\n📥 Incoming Failure Event:")
         print(log)
@@ -59,6 +68,12 @@ def run_agent():
         print("\n🤖 AI Output:")
         print(ai_output)
         ai_output["failure_id"] = failure_id
+        notify_slack("🤖 AI has generated a fix for the failure.")
+        send_email(
+            to_email="anjalikasingh1603@gmail.com",
+            subject="AI Fix Generated",
+            body=f"AI generated a patch for failure ID: {failure_id}"
+        )
          # --- STEP 2: Create PR from AI patch ---
         try:
             patch = ai_output.get("patch")
@@ -74,6 +89,13 @@ def run_agent():
             ai_output["pr_url"] = pr_url
 
             print("🚀 PR Created Successfully:", pr_url)
+            if pr_url:
+                notify_slack(f"🚀 PR Created: {pr_url}")
+                send_email(
+                    to_email="anjalikasingh1603@gmail.com",
+                    subject="🚀 PR Created",
+                    body=f"AI created a PR for failure {failure_id}\n{pr_url}"
+                )
 
         except Exception as e:
             print("❌ Error while creating PR:", e)

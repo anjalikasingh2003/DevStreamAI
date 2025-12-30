@@ -3,6 +3,7 @@ from confluent_kafka import Producer
 from datetime import datetime, timezone
 import json, uuid, os, hmac, hashlib, re
 from dotenv import load_dotenv
+from server.notifier import notify_slack, notify_email
 
 load_dotenv()
 app = FastAPI()
@@ -123,6 +124,17 @@ async def github_webhook(
         pr = payload["pull_request"]
         action = payload["action"]
         branch = pr["head"]["ref"]
+        if action == "opened":
+            notify_slack(f"📄 PR #{pr['number']} opened: {pr['html_url']}")
+            notify_email("PR Opened", f"A PR has been opened:\n{pr['html_url']}")
+
+        elif action == "closed" and pr.get("merged"):
+            notify_slack(f"🎉 PR #{pr['number']} merged successfully!")
+            notify_email("PR Merged", f"PR merged:\n{pr['html_url']}")
+
+        elif action == "closed":
+            notify_slack(f"❌ PR #{pr['number']} was closed without merging")
+            notify_email("PR Closed", f"PR closed:\n{pr['html_url']}")
 
         failure_id = extract_failure_id(branch)
 
