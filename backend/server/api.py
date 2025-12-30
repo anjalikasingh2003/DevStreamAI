@@ -127,7 +127,7 @@ async def github_webhook(
         branch = pr["head"]["ref"]
         if action == "opened":
             notify_slack(f"📄 PR #{pr['number']} opened: {pr['html_url']}")
-            send_email("PR Opened", f"A PR has been opened:\n{pr['html_url']}")
+            send_email("anjalikasingh1603@gmail.com", "PR Opened", f"A PR has been opened:\n{pr['html_url']}")
 
         elif action == "closed" and pr.get("merged"):
             notify_slack(f"🎉 PR #{pr['number']} merged successfully!")
@@ -160,21 +160,3 @@ async def github_webhook(
     # ==============================================
     return {"status": "ignored", "event": event_type}
 
-
-
-# @app.post("/rerun_ci")
-# def rerun_ci(workflow_id: int, run_id: int):
-#     """
-#     Re-runs a GitHub Actions workflow.
-#     """
-#     url = f"https://api.github.com/repos/{OWNER}/{REPO}/actions/runs/{run_id}/rerun"
-#     headers = {
-#         "Authorization": f"token {GITHUB_TOKEN}",
-#         "Accept": "application/vnd.github+json"
-#     }
-
-#     resp = requests.post(url, headers=headers)
-
-#     if resp.status_code in (200, 201, 202):
-#         return {"ok": True, "message": "CI Re-run triggered"}
-#     return {"ok": False, "error": resp.text}

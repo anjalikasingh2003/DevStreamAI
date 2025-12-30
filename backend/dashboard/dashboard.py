@@ -259,20 +259,6 @@ for build_id, info in sorted(st.session_state.builds.items(), key=lambda x: x[1]
         else:
             st.warning("⏳ AI is analyzing...")
 
-            # # RERUN CI BUTTON
-            # if fix and fix.get("pr_url"):
-            #     run_id = info["failure"].get("run_id")  # we will add this
-            #     if st.button(f"🔁 Re-run CI for Build {build_id}", key=f"rerun_{build_id}"):
-            #         api_url = "https://devstream-backend-176657413002.us-central1.run.app/rerun_ci"
-            #         payload = {"workflow_id": 1, "run_id": run_id}
-
-            #         result = requests.post(api_url, json=payload)
-            #         if result.json().get("ok"):
-            #             st.success("CI Re-run Triggered!")
-            #         else:
-            #             st.error("Failed to rerun CI")
-
-
 
     # PR TIMELINE
     st.subheader("📌 Pull Request Timeline")
