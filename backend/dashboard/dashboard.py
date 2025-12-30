@@ -9,6 +9,42 @@ import pandas as pd
 # Load .env
 load_dotenv()
 
+def render_diff(diff_text):
+    html = """
+    <style>
+    .diff-box { 
+        font-family: 'JetBrains Mono', monospace; 
+        background: #f8f9fa;
+        padding: 12px; 
+        border-radius: 6px; 
+        border-left: 3px solid #4a90e2;
+        font-size: 14px;
+        white-space: pre-wrap;
+        line-height: 1.4;
+    }
+    .diff-add { background: #e7f7ed; color: #137333; padding: 2px 4px; display: block; }
+    .diff-del { background: #fdecea; color: #a33; padding: 2px 4px; display: block; }
+    .diff-context { background: #f1f3f4; color: #333; padding: 2px 4px; display: block; }
+    .diff-header { background: #e8f0fe; color: #174ea6; padding: 4px 4px; font-weight: bold; display: block; }
+    </style>
+    <div class='diff-box'>
+    """
+
+    for line in diff_text.split("\n"):
+        if line.startswith("diff --git"):
+            html += f"<div class='diff-header'>{line}</div>"
+        elif line.startswith("@@"):
+            html += f"<div class='diff-header'>{line}</div>"
+        elif line.startswith("+"):
+            html += f"<div class='diff-add'>{line}</div>"
+        elif line.startswith("-"):
+            html += f"<div class='diff-del'>{line}</div>"
+        else:
+            html += f"<div class='diff-context'>{line}</div>"
+
+    html += "</div>"
+    return html
+
 # -----------------------------------------------------
 # PAGE CONFIG + CSS
 # -----------------------------------------------------
@@ -204,7 +240,7 @@ for build_id, info in sorted(st.session_state.builds.items(), key=lambda x: x[1]
                 st.code(fail.get("code", ""), language="python")
         else:
             st.info("Waiting for failure...")
-
+        
     # FIX
     with c2:
         fix = info["fix"]
@@ -222,6 +258,21 @@ for build_id, info in sorted(st.session_state.builds.items(), key=lambda x: x[1]
                 st.error(f"PR Error: {fix['pr_error']}")
         else:
             st.warning("⏳ AI is analyzing...")
+
+            # # RERUN CI BUTTON
+            # if fix and fix.get("pr_url"):
+            #     run_id = info["failure"].get("run_id")  # we will add this
+            #     if st.button(f"🔁 Re-run CI for Build {build_id}", key=f"rerun_{build_id}"):
+            #         api_url = "https://devstream-backend-176657413002.us-central1.run.app/rerun_ci"
+            #         payload = {"workflow_id": 1, "run_id": run_id}
+
+            #         result = requests.post(api_url, json=payload)
+            #         if result.json().get("ok"):
+            #             st.success("CI Re-run Triggered!")
+            #         else:
+            #             st.error("Failed to rerun CI")
+
+
 
     # PR TIMELINE
     st.subheader("📌 Pull Request Timeline")
@@ -258,6 +309,41 @@ for build_id, info in sorted(st.session_state.builds.items(), key=lambda x: x[1]
                     📄 PR Opened
                 </div>
             """, unsafe_allow_html=True)
+
+
+    # -----------------------------------------------------
+    # PR DIFF VIEWER (NEW)
+    # -----------------------------------------------------
+    st.subheader("📄 PR Diff Viewer")
+
+    # Find the latest PR event for this build
+    pr_events = info.get("pr", [])
+    if len(pr_events) > 0:
+        latest = pr_events[-1]
+        pr_number = latest.get("pr_number")
+
+        if pr_number:
+            import requests
+
+            owner = os.getenv("GITHUB_OWNER")
+            repo = os.getenv("GITHUB_REPO")
+            token = os.getenv("GITHUB_TOKEN")
+
+            diff_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
+            headers = {
+                "Authorization": f"token {token}",
+                "Accept": "application/vnd.github.v3.diff"
+            }
+
+            response = requests.get(diff_url, headers=headers)
+
+            if response.status_code == 200:
+                diff_text = response.text
+                with st.expander(f"View Full Diff for PR #{pr_number}", expanded=False):
+                    st.markdown(render_diff(diff_text), unsafe_allow_html=True)
+
+            else:
+                st.warning("⚠ Could not fetch PR diff. Check your GitHub token.")
 
     st.divider()
 

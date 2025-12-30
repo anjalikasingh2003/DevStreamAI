@@ -53,7 +53,7 @@ def run_agent():
         if msg.topic() == "ci_failures":
             notify_slack(f"🚨 CI Failure detected in {data['repo_name']} on {data['branch']}")
             send_email(
-                to_email="anjalikasingh2003@gmail.com",
+                to_email="anjalikasingh1603@gmail.com",
                 subject="🚨 CI Failure Detected",
                 body=f"Repo: {data['repo_name']}\nBranch: {data['branch']}\nCommit: {data['commit']}"
             )

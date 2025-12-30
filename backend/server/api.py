@@ -3,7 +3,8 @@ from confluent_kafka import Producer
 from datetime import datetime, timezone
 import json, uuid, os, hmac, hashlib, re
 from dotenv import load_dotenv
-from server.notifier import notify_slack, notify_email
+from server.notifier import notify_slack, send_email
+import requests
 
 load_dotenv()
 app = FastAPI()
@@ -126,15 +127,15 @@ async def github_webhook(
         branch = pr["head"]["ref"]
         if action == "opened":
             notify_slack(f"📄 PR #{pr['number']} opened: {pr['html_url']}")
-            notify_email("PR Opened", f"A PR has been opened:\n{pr['html_url']}")
+            send_email("PR Opened", f"A PR has been opened:\n{pr['html_url']}")
 
         elif action == "closed" and pr.get("merged"):
             notify_slack(f"🎉 PR #{pr['number']} merged successfully!")
-            notify_email("PR Merged", f"PR merged:\n{pr['html_url']}")
+            send_email("anjalikasingh1603@gmail.com", "PR Merged", f"PR merged:\n{pr['html_url']}")
 
         elif action == "closed":
             notify_slack(f"❌ PR #{pr['number']} was closed without merging")
-            notify_email("PR Closed", f"PR closed:\n{pr['html_url']}")
+            send_email("anjalikasingh1603@gmail.com", "PR Closed", f"PR closed:\n{pr['html_url']}")
 
         failure_id = extract_failure_id(branch)
 
@@ -158,3 +159,22 @@ async def github_webhook(
     # IGNORE OTHER EVENTS
     # ==============================================
     return {"status": "ignored", "event": event_type}
+
+
+
+# @app.post("/rerun_ci")
+# def rerun_ci(workflow_id: int, run_id: int):
+#     """
+#     Re-runs a GitHub Actions workflow.
+#     """
+#     url = f"https://api.github.com/repos/{OWNER}/{REPO}/actions/runs/{run_id}/rerun"
+#     headers = {
+#         "Authorization": f"token {GITHUB_TOKEN}",
+#         "Accept": "application/vnd.github+json"
+#     }
+
+#     resp = requests.post(url, headers=headers)
+
+#     if resp.status_code in (200, 201, 202):
+#         return {"ok": True, "message": "CI Re-run triggered"}
+#     return {"ok": False, "error": resp.text}
