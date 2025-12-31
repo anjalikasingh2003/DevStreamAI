@@ -68,6 +68,8 @@ def run_agent():
         print("\n🤖 AI Output:")
         print(ai_output)
         ai_output["failure_id"] = failure_id
+        ai_output["repo_owner"] = data["repo_owner"]
+        ai_output["repo_name"] = data["repo_name"]
         notify_slack("🤖 AI has generated a fix for the failure.")
         send_email(
             to_email="anjalikasingh1603@gmail.com",
@@ -83,9 +85,15 @@ def run_agent():
                 print("⚠️ No patch produced by AI. Skipping PR.")
                 continue
 
+            owner = data["repo_owner"]
+            repo  = data["repo_name"]
+            token = os.getenv("GITHUB_TOKEN")
+
+            print("GITHUB OWNER/REPO:", owner, repo)
+
             print("\n🛠️ Creating PR...")
             file_path = data.get("file_path")
-            pr_url = create_pr_from_patch(patch, explanation, file_path, failure_id)
+            pr_url = create_pr_from_patch(patch, explanation, file_path, failure_id, owner, repo)
             ai_output["pr_url"] = pr_url
 
             print("🚀 PR Created Successfully:", pr_url)

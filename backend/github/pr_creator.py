@@ -131,7 +131,7 @@ def apply_patch_fallback(repo_path: str, filename: str, patch: str):
         f.write("\n".join(updated) + "\n")
 
 
-def create_pr_from_patch(full_patch: str, explanation: str, file_path: str, failure_id: str):
+def create_pr_from_patch(full_patch: str, explanation: str, file_path: str, failure_id: str, owner: str, repo: str):
     """
     Creates AI PR with:
     - multi-file patch support
@@ -139,10 +139,10 @@ def create_pr_from_patch(full_patch: str, explanation: str, file_path: str, fail
     - AI metadata
     """
     with tempfile.TemporaryDirectory() as tmp:
-        repo_url = f"https://{GITHUB_TOKEN}@github.com/{OWNER}/{REPO}.git"
+        repo_url = f"https://{GITHUB_TOKEN}@github.com/{owner}/{repo}.git"
 
         run(["git", "clone", repo_url], cwd=tmp)
-        repo_path = f"{tmp}/{REPO}"
+        repo_path = f"{tmp}/{repo}"
 
         # branch with failure_id
         branch = f"ai-fix-{failure_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
@@ -178,17 +178,25 @@ def create_pr_from_patch(full_patch: str, explanation: str, file_path: str, fail
         run(["git", "commit", "-m", f"AI Fix for failure {failure_id}"], cwd=repo_path)
         run(["git", "push", "origin", branch], cwd=repo_path)
 
+
         # Create PR
         headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+        repo_info = requests.get(
+            f"https://api.github.com/repos/{owner}/{repo}",
+            headers=headers
+        ).json()
+
+        default_branch = repo_info.get("default_branch", "main")
+        print("Using default branch:", default_branch)
         data = {
             "title": f"AI Fix for CI Failure {failure_id}",
             "head": branch,
-            "base": BASE_BRANCH,
+            "base": default_branch,
             "body": f"### 🤖 AI-Generated Fix\n\n**Failure ID:** {failure_id}\n\n{explanation}",
         }
 
         resp = requests.post(
-            f"https://api.github.com/repos/{OWNER}/{REPO}/pulls",
+            f"https://api.github.com/repos/{owner}/{repo}/pulls",
             headers=headers,
             json=data
         )

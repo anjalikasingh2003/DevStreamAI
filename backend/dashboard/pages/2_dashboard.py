@@ -8,6 +8,12 @@ import pandas as pd
 
 # Load .env
 load_dotenv()
+REG_FILE = "registered_repos.json"
+
+def load_registered_repos():
+    if os.path.exists(REG_FILE):
+        return json.load(open(REG_FILE))
+    return []
 
 def render_diff(diff_text):
     html = """
@@ -81,6 +87,21 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------
+# REPO SELECTOR (NEW)
+# -----------------------------------------------------
+st.sidebar.title("📁 Connected Repositories")
+
+repos = load_registered_repos()
+
+if len(repos) == 0:
+    st.sidebar.info("No repositories connected yet.")
+    st.stop()
+
+selected_repo = st.sidebar.selectbox("Select Repository", repos)
+
+st.sidebar.success(f"Showing events for: {selected_repo}")
+
+# -----------------------------------------------------
 # KAFKA CONSUMER
 # -----------------------------------------------------
 @st.cache_resource
@@ -146,7 +167,6 @@ def compute_system_status():
 
     return (heartbeat, f"Last event {int(gap)}s ago", latency_ms)
 
-
 # -----------------------------------------------------
 # HEADER
 # -----------------------------------------------------
@@ -198,6 +218,7 @@ msg = consumer.poll(0.5)
 
 if msg and not msg.error():
     data = json.loads(msg.value().decode("utf-8"))
+    
     st.session_state.last_message_ts = time.time()
 
     topic = msg.topic()
@@ -225,6 +246,24 @@ if msg and not msg.error():
 # SHOW BUILDS
 # -----------------------------------------------------
 for build_id, info in sorted(st.session_state.builds.items(), key=lambda x: x[1]["ts"], reverse=True):
+
+    # Skip builds belonging to other repos
+    fail = info.get("failure")
+    fix = info.get("fix")
+
+    # If no event yet, skip
+    if not fail and not fix:
+        continue
+
+    event_repo = None
+    if fail:
+        event_repo = f"{fail.get('repo_owner')}/{fail.get('repo_name')}"
+    elif fix:
+        event_repo = f"{fix.get('repo_owner')}/{fix.get('repo_name')}"
+
+    if event_repo != selected_repo:
+        continue
+
 
     st.markdown(f"## 🧪 Build `{build_id}`")
 

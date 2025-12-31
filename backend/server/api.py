@@ -160,3 +160,117 @@ async def github_webhook(
     # ==============================================
     return {"status": "ignored", "event": event_type}
 
+
+@app.post("/api/register_repo")
+async def register_repo(request: Request):
+    data = await request.json()
+
+    repo_url = data.get("repo_url")
+    if not repo_url:
+        return {"status": "error", "message": "Missing repo_url"}
+
+    # Extract owner/repo
+    try:
+        # Example: https://github.com/anjalika/Dummy
+        owner, repo = repo_url.rstrip("/").split("/")[-2:]
+        full_name = f"{owner}/{repo}"
+    except:
+        return {"status": "error", "message": "Invalid GitHub repo URL"}
+
+    # Store in file/db/env (for hackathon: store in JSON)
+    REG_FILE = "registered_repos.json"
+
+    try:
+        if os.path.exists(REG_FILE):
+            existing = json.load(open(REG_FILE))
+        else:
+            existing = []
+
+        if full_name not in existing:
+            existing.append(full_name)
+            json.dump(existing, open(REG_FILE, "w"), indent=2)
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+    # Return YAML template auto-generated for user
+    github_yaml = """
+    name: DevStreamAI CI
+
+on:
+  push:
+    branches: ["master", "main"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Add project root to PYTHONPATH
+        run: echo "PYTHONPATH=$(pwd)" >> $GITHUB_ENV
+
+      - name: Run tests
+        id: tests
+        continue-on-error: true
+        run: |
+          echo "Running tests..."
+          pytest --maxfail=1
+
+      - name: Send CI failure to DevStream AI
+        if: ${{ steps.tests.outcome == 'failure' }}
+        run: |
+          echo "❌ Tests failed — sending details to DevStream AI..."
+
+          ERROR_LOG=$(pytest --maxfail=1 2>&1 || true)
+
+          FILE_PATH=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep ".py" | head -n 1 || true)
+          if [ -z "$FILE_PATH" ]; then
+              FILE_PATH=$(echo "$ERROR_LOG" | grep -oP '(?<=File ")[^"]+\.py' | head -n 1)
+          fi
+          if [ -z "$FILE_PATH" ]; then
+              FILE_PATH=$(echo "$ERROR_LOG" | grep -oP "src/[A-Za-z0-9_\/]+\.py" | head -n 1)
+          fi
+          if [ -z "$FILE_PATH" ]; then
+              FILE_PATH=$(find . -type f -name "*.py" | head -n 1)
+          fi
+
+          echo "📌 Detected failing file: $FILE_PATH"
+
+          CODE_CONTENT=$(sed ':a;N;$!ba;s/\n/\\n/g' "$FILE_PATH" | sed 's/"/\\"/g')
+          ESCAPED_LOG=$(printf "%s" "$ERROR_LOG" | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/"/\\"/g')
+
+          curl -X POST "${{ secrets.DEVSTREAM_WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"repo_owner\": \"${{ github.repository_owner }}\",
+              \"repo_name\": \"${{ github.event.repository.name }}\",
+              \"branch\": \"${GITHUB_REF_NAME}\",
+              \"commit\": \"${GITHUB_SHA}\",
+              \"log\": \"$ESCAPED_LOG\",
+              \"file_path\": \"$FILE_PATH\",
+              \"code\": \"$CODE_CONTENT\"
+            }"
+
+      - name: Success message
+        if: ${{ steps.tests.outcome == 'success' }}
+        run: echo "✔ CI passed without errors."
+    """
+
+    return {
+        "status": "success",
+        "repo": full_name,
+        "yaml_template": github_yaml
+    }
+
+
