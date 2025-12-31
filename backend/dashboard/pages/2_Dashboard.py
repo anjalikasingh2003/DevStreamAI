@@ -9,13 +9,14 @@ from streamlit_autorefresh import st_autorefresh
 
 # Load .env
 load_dotenv()
-REG_FILE = "registered_repos.json"
+
+from google.cloud import firestore
+db = firestore.Client()
 
 def load_registered_repos():
-    if os.path.exists(REG_FILE):
-        with open(REG_FILE, 'r') as f:
-            return json.load(f)
-    return []
+    repos = db.collection("repos").stream()
+    repo_names = [doc.to_dict()["full_name"] for doc in repos]
+    return repo_names
 
 def render_diff(diff_text):
     html = """

@@ -1,8 +1,10 @@
+from datetime import datetime
 import streamlit as st
 import requests
 import os
 import json
-
+from google.cloud import firestore
+db = firestore.Client()
 API_URL = "https://devstream-backend-176657413002.us-central1.run.app"
 REG_FILE = "registered_repos.json"
 
@@ -148,7 +150,11 @@ if submit:
         # Save to registered repos
         repo_full_name = data.get('repo')
         if repo_full_name:
-            save_registered_repo(repo_full_name)
+            doc_id = repo_full_name.replace("/", "_")  # owner_repo
+            db.collection("repos").document(doc_id).set({
+                "full_name": repo_full_name,
+                "added_at": datetime.now().isoformat()
+            })
 
         # ---------------------------------------------------------
         # SUCCESS STATE

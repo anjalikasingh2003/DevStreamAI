@@ -8,7 +8,9 @@ import requests
 
 load_dotenv()
 app = FastAPI()
+from google.cloud import firestore
 
+db = firestore.Client()
 # ----------------------------
 # KAFKA PRODUCER
 # ----------------------------
@@ -148,6 +150,8 @@ async def github_webhook(
             "pr_url": pr["html_url"],
             "branch": branch,
             "failure_id": failure_id,
+            "repo_owner": payload["repository"]["owner"]["login"],
+            "repo_name": payload["repository"]["name"],
         }
 
         producer.produce("ci_pr_updates", json.dumps(kafka_event).encode())
@@ -176,22 +180,16 @@ async def register_repo(request: Request):
         full_name = f"{owner}/{repo}"
     except:
         return {"status": "error", "message": "Invalid GitHub repo URL"}
-
-    # Store in file/db/env (for hackathon: store in JSON)
-    REG_FILE = "registered_repos.json"
-
-    try:
-        if os.path.exists(REG_FILE):
-            existing = json.load(open(REG_FILE))
-        else:
-            existing = []
-
-        if full_name not in existing:
-            existing.append(full_name)
-            json.dump(existing, open(REG_FILE, "w"), indent=2)
-
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    # Firestore document ID = owner_repo
+    doc_id = f"{owner}_{repo}"
+    
+    repo_ref = db.collection("repos").document(doc_id)
+    repo_ref.set({
+        "owner": owner,
+        "repo": repo,
+        "full_name": full_name,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }, merge=True)
 
     # Return YAML template auto-generated for user
     github_yaml = """

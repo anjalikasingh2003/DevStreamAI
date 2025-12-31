@@ -4,3 +4,7 @@ google-cloud-aiplatform
 python-dotenv
 confluent-kafka
 requests
+google-cloud-firestore
+google-cloud-core
+google-auth
+google-auth-oauthlib
